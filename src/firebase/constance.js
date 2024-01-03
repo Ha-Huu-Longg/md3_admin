@@ -1,0 +1,1 @@
+export const LOGO_LINK = `https://firebasestorage.googleapis.com/v0/b/adminphone-27264.appspot.com/o/image%2Flogo_NLA_Shop.png9662b9ac-545e-4ba3-8784-e849e625d139?alt=media&token=80380237-0a81-4311-95c7-f09ce1da3ae3`

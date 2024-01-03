@@ -1,95 +1,80 @@
-import { Button, Col, Image, Row, Space, Table, message, Input, Modal, Form, Select, Upload } from 'antd'
-import { useEffect, useRef, useState } from 'react'
-import { createProduct, deleteProduct, getAllProduct, updateProduct } from '../axiosConfig/product'
-import { DeleteOutlined, EditOutlined, StarOutlined, LoadingOutlined, PlusOutlined } from '@ant-design/icons'
+import { Button, Col, Image, Row, Space, Table, message, Input, Modal, Form, Select, Popconfirm } from 'antd'
+import { useEffect, useState } from 'react'
+import { DeleteOutlined, EditOutlined } from '@ant-design/icons'
 import { storage } from '../firebase/firebaseConfig'
-import { ref, uploadBytes, listAll, getDownloadURL, uploadString } from 'firebase/storage'
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { v4 } from "uuid"
+import axios from 'axios'
 
 const { Search } = Input
 
-const Columns = (expandedRowKeys, toggleDetail, handleConfirmDelete, handleOpenEditForm) => [
+const Columns = (confirm, handleClickEdit, categories) => [
     {
         title: '#',
-        dataIndex: "key",
-        key: 'key',
         width: 50,
+        render: (_, __, i) => <>{i + 1}</>
     },
-    // {
-    //     title: 'Id',
-    //     dataIndex: 'Id',
-    //     key: 'Id',
-    //     width: 50,
-    // },
     {
-        title: 'Photo',
-        dataIndex: 'HinhAnhSanPham',
-        key: 'HinhAnhSanPham',
+        title: 'Image',
+        dataIndex: 'image',
+        key: 'image',
         width: 150,
         align: "center",
         render: (src) => (<Image width={100} src={src} />)
     },
     {
         title: 'Category',
-        dataIndex: 'IdLoaiSanPham',
-        key: 'IdLoaiSanPham',
+        dataIndex: 'category_id',
+        key: 'category_id',
         align: "center",
         width: 100,
-        render: (category) => (<span>{category == 1 ? "Iphone" : category == 2 ? "Samsung" : category == 3 ? "Xiaomi" : "OnePlus"}</span>)
+        render: (category_id) => (<span>{categories.find(item => item.id == category_id).name}</span>)
     },
     {
         title: 'Name',
-        dataIndex: 'TenSanPham',
-        key: 'TenSanPham',
+        dataIndex: 'name',
+        key: 'name',
         align: "center",
     },
     {
-        title: 'Detail',
-        dataIndex: 'MoTaSanPham',
-        key: 'MoTaSanPham',
+        title: 'Description',
+        dataIndex: 'description',
+        key: 'description',
         align: "center",
-        render: (text, record) => {
-            return (
-                <div>
-                    {text.length > 30 ? (
-                        <span>
-                            {expandedRowKeys.includes(record.Id) ? text : `${text.slice(0, 30)}...`}
-                            <Button type="link" onClick={() => toggleDetail(record)}>
-                                {expandedRowKeys.includes(record.Id) ? 'Ẩn' : 'Xem đầy đủ'}
-                            </Button>
-                        </span>
-                    ) : (
-                        text
-                    )}
-                </div>
-            );
-        },
     },
     {
         title: 'Price',
-        dataIndex: 'GiaSanPham',
-        key: 'GiaSanPham',
+        dataIndex: 'price',
+        key: 'price',
         align: "center",
         width: 120,
         render: (price) => (<span>{Number(price).toLocaleString('vi-VN', { style: 'currency', currency: 'VND' })}</span>)
     },
     {
-        title: 'Rating',
-        dataIndex: 'rating',
-        key: 'rating',
+        title: 'Stock',
+        dataIndex: 'stock',
+        key: 'stock',
         width: 80,
         align: "center",
-        render: (rating) => (<>{rating} <StarOutlined /></>)
     },
     {
         title: 'Action',
         key: 'action',
         align: "center",
         width: 200,
-        render: (_, record) => (
+        render: (_, product) => (
             <Space size="middle">
-                <Button icon={<EditOutlined />} onClick={() => handleOpenEditForm(record)}></Button>
-                <Button icon={<DeleteOutlined />} danger onClick={() => handleConfirmDelete(record.Id)}></Button>
+                <Button icon={<EditOutlined />} onClick={() => handleClickEdit(product)}></Button>
+                <Popconfirm
+                    title="Delete the task"
+                    description="Are you sure to delete this task?"
+                    okText="Yes"
+                    cancelText="No"
+                    onConfirm={() => confirm(record.id)}
+                    onCancel={() => { }}
+                >
+                    <Button icon={<DeleteOutlined />} danger></Button>
+                </Popconfirm>
             </Space>
         ),
     },
@@ -98,66 +83,39 @@ const Columns = (expandedRowKeys, toggleDetail, handleConfirmDelete, handleOpenE
 const Product = () => {
 
     const [products, setProducts] = useState([])
-    const [productSearch, setProductSearch] = useState([])
-    const [messageApi, contextHolder] = message.useMessage()
+    const [categories, setCategories] = useState([])
     const [isModalOpen, setIsModalOpen] = useState(false)
-    const [isOpenDelete, setIsOpenDelete] = useState(false)
-    const [idDelete, setIdDelete] = useState(null)
-    const [dataUpdate, setDataUpdate] = useState(null)
+    const [productUpdate, setProductUpdate] = useState(null)
 
-
-    const formRef = useRef();
+    const [form] = Form.useForm()
 
     const [imageUpload, setImageUpload] = useState(null)
     const [linkImage, setLinkImage] = useState("")
-    const [expandedRowKeys, setExpandedRowKeys] = useState([]);
 
-    const toggleDetail = (record) => {
-        const newExpandedRowKeys = [...expandedRowKeys];
-        if (newExpandedRowKeys.includes(record.Id)) {
-            newExpandedRowKeys.splice(newExpandedRowKeys.indexOf(record.Id), 1);
-        } else {
-            newExpandedRowKeys.push(record.Id);
-        }
-        setExpandedRowKeys(newExpandedRowKeys);
-    };
-
-    const getAll = async () => {
-        const response = await getAllProduct()
-        if (response && response.data) {
-            setProducts(addKeyForData(response.data))
-            setProductSearch(addKeyForData(response.data))
+    const getCategories = async () => {
+        try {
+            const response = await axios.get("http://localhost:3000/api/categories")
+            setCategories(response.data.data)
+        } catch (error) {
+            console.log(error);
         }
     }
 
-    const addKeyForData = (data) => {
-        if (!Array.isArray(data)) {
-            return []
+    const getProducts = async () => {
+        try {
+            const response = await axios.get("http://localhost:3000/api/products")
+            setProducts(response.data.data)
+        } catch (error) {
+            console.log(error);
         }
-        return data.map((value, i) => {
-            return {
-                ...value,
-                key: i + 1
-            }
-        })
     }
 
-    useEffect(() => {
-        (async () => {
-            await getAll()
-        })()
-    }, [])
-
-    const onSearch = (value) => {
+    const onSearch = async (value) => {
         const textSearch = value.trim().toLowerCase()
-        const newProducts = products.filter((product) => product.TenSanPham.toLowerCase().includes(textSearch) ||
-            product.MoTaSanPham.toLowerCase().includes(textSearch) || product.GiaSanPham.toLowerCase().includes(textSearch))
-        setProductSearch(newProducts)
+        const response = await axios.get(`http://localhost:3000/api/products/search?textSearch=${textSearch}`)
+        setProducts(response.data.data)
     }
 
-    const handleReset = () => {
-        formRef.current.resetFields()
-    }
 
     const showModal = () => {
         setIsModalOpen(true);
@@ -178,44 +136,54 @@ const Product = () => {
             return
         }
 
-        if (dataUpdate != null) {
+        if (productUpdate != null) {
             const rawData = {
-                Id: dataUpdate.Id,
+                id: productUpdate.id,
                 ...values,
-                idLoaiSanPham: convertIdCategory(values.idLoaiSanPham),
-                hinhAnhSanPham: linkImage
+                image: linkImage
             }
-            if (rawData.hinhAnhSanPham.includes("https")) {
-                const response = await updateProduct(rawData)
-                if (response && response.data && response.status == 200) {
-                    message.info(response.data)
+            if (rawData.image.includes("https")) {
+                const token = localStorage.getItem("token")
+                const response = await axios.put(`http://localhost:3000/api/products`, rawData, {
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                })
+                if (response.data.data.affectedRows == 1) {
+                    message.info("success")
                     handleCloseEditForm()
-                    getAll()
+                    getProducts()
+                } else {
+                    message.error("faile")
                 }
-            } else {
+            }
+            else {
                 const imageRef = ref(storage, `image/${imageUpload.name + v4()}`)
                 uploadBytes(imageRef, imageUpload)
                     .then((snapshot) => {
                         getDownloadURL(snapshot.ref)
-                            .then((url) => {
-                                return {
-                                    ...rawData,
-                                    hinhAnhSanPham: url
+                            .then(async (url) => {
+                                const newProduct = {
+                                    id: productUpdate.id,
+                                    ...values,
+                                    image: url
                                 }
-                            })
-                            .then((data) => {
-                                return updateProduct(data)
-                            }).then((response) => {
-                                if (response && response.data && response.status == 200) {
-                                    message.info(response.data)
+
+                                const token = localStorage.getItem("token")
+                                const response = await axios.put(`http://localhost:3000/api/products`, newProduct, {
+                                    headers: {
+                                        Authorization: `Bearer ${token}`
+                                    }
+                                })
+                                if (response.data.data.affectedRows == 1) {
+                                    message.info("success")
                                     handleCloseEditForm()
-                                    getAll()
+                                    getProducts()
+                                } else {
+                                    message.error("faile")
                                 }
                             })
-                            .catch((error) => {
-                                console.log(error);
-                                message.info("Firebase failure!")
-                            })
+
                     })
                     .catch((error) => {
                         console.log(error);
@@ -229,87 +197,36 @@ const Product = () => {
         uploadBytes(imageRef, imageUpload)
             .then((snapshot) => {
                 getDownloadURL(snapshot.ref)
-                    .then((url) => {
-                        return {
+                    .then(async (url) => {
+                        const newProduct = {
                             ...values,
-                            hinhAnhSanPham: url
+                            image: url
                         }
-                    })
-                    .then((data) => {
-                        return createProduct(data)
-                    }).then((response) => {
-                        if (response && response.data && response.status == 200) {
-                            message.info(response.data)
+                        const token = localStorage.getItem("token")
+                        const response = await axios.post("http://localhost:3000/api/products", newProduct, {
+                            headers: {
+                                Authorization: `Bearer ${token}`
+                            }
+                        })
+                        if (response.data.data.insertId) {
+                            message.info("success")
                             handleCloseEditForm()
-                            getAll()
+                            getProducts()
+                        } else {
+                            message.error("faile!!")
                         }
                     })
             })
     }
 
-    const onFinishFailed = (errorInfo) => {
-        console.log('Failed:', errorInfo);
-    }
-
-    const handleChangeSelect = () => {
-
-    }
-
-    const handleConfirmDelete = (Id) => {
-        setIdDelete(Id)
-        setIsOpenDelete(true)
-    }
-
-    const handleDelete = async () => {
-        const response = await deleteProduct(idDelete)
-        if (response && response.data && response.status == 200) {
-            message.info(response.data)
-            setIdDelete(null)
-            setIsOpenDelete(false)
-            getAll()
-        }
-    }
 
     const handleCloseEditForm = () => {
-        handleReset()
+        form.resetFields()
         setIsModalOpen(false)
-        setDataUpdate(null)
+        setProductUpdate(null)
         setLinkImage("")
     }
 
-    const convertIdCategory = (text) => {
-        switch (text) {
-            case "Iphone":
-                return 1
-            case "Samsung":
-                return 2
-            case "Xiaomi":
-                return 3
-            case "OnePlus":
-                return 4
-            default:
-                return text
-        }
-    }
-
-    const handleOpenEditForm = async (data) => {
-        // console.log("==> data: ", data.HinhAnhSanPham);
-        await setDataUpdate(data)
-        await setIsModalOpen(true)
-
-        const category = data.IdLoaiSanPham
-        const categoryText = () => category == 1 ? "Iphone" : category == 2 ? "Samsung" : category == 3 ? "Xiaomi" : "OnePlus"
-
-        formRef.current.setFieldsValue({
-            tenSanPham: data.TenSanPham,
-            giaSanPham: data.GiaSanPham,
-            // idLoaiSanPham: data.IdLoaiSanPham,
-            idLoaiSanPham: categoryText(),
-            rating: data.rating,
-            moTaSanPham: data.MoTaSanPham
-        })
-        setLinkImage(data.HinhAnhSanPham)
-    }
 
     const handleChoosePhoto = (e) => {
         if (!e.target.files) {
@@ -319,20 +236,43 @@ const Product = () => {
         setLinkImage(URL.createObjectURL(e.target.files[0]))
     }
 
+    const confirm = async (id) => {
+        const token = localStorage.getItem("token")
+        const response = await axios.delete(`http://localhost:3000/api/products/${id}`, {
+            headers: {
+                Authorization: `Bearer ${token}`
+            }
+        })
+        if (response.data.data.affectedRows) {
+            message.info("oke")
+            getProducts()
+        } else {
+            message.error("faile!!!")
+        }
+    }
+
+    const handleClickEdit = (product) => {
+        form.setFieldsValue(product)
+        setLinkImage(product.image)
+        setProductUpdate(product)
+        setIsModalOpen(true)
+    }
+
+    useEffect(() => {
+        getCategories()
+        getProducts()
+    }, [])
+
     return (
         <div className='account w-100'>
-            {contextHolder}
 
-            <Modal title="Delete Product" open={isOpenDelete} onOk={handleDelete} onCancel={handleCancel} maskClosable={false}>
-                <p>Do you definitely want to delete products with ID {idDelete}</p>
-            </Modal>
 
-            <Modal title={`Product ${dataUpdate ? "Update" : "Create"}`} open={isModalOpen} onOk={handleOk} onCancel={handleCloseEditForm}
+            <Modal title={`Product ${productUpdate ? "Update" : "Create"}`} open={isModalOpen} onOk={handleOk} onCancel={handleCloseEditForm}
                 maskClosable={false} footer={<></>} width={1000}
             >
                 <Form
                     name="basic"
-                    ref={formRef}
+                    form={form}
                     labelCol={{
                         span: 8,
                     }}
@@ -346,14 +286,38 @@ const Product = () => {
                         remember: true,
                     }}
                     onFinish={onFinish}
-                    onFinishFailed={onFinishFailed}
+                    onFinishFailed={() => { }}
                     autoComplete="off"
                 >
                     <Row>
+
+                        <Col span={6}>
+                            <Form.Item
+                                label="Category"
+                                name="category_id"
+                                rules={[
+                                    {
+                                        required: true,
+                                        message: 'Please input category!',
+                                    },
+                                ]}
+                            >
+                                <Select
+                                    style={{
+                                        width: "100%",
+                                    }}
+                                    options={categories.map((item) => ({
+                                        value: item.id,
+                                        label: item.name
+                                    }))}
+                                />
+                            </Form.Item>
+                        </Col>
+
                         <Col span={9}>
                             <Form.Item
                                 label="Name"
-                                name="tenSanPham"
+                                name="name"
                                 labelCol={{
                                     span: 5,
                                 }}
@@ -372,48 +336,12 @@ const Product = () => {
                             </Form.Item>
                         </Col>
 
-                        <Col span={6}>
-                            <Form.Item
-                                label="Category"
-                                name="idLoaiSanPham"
-                                rules={[
-                                    {
-                                        required: true,
-                                        message: 'Please input category!',
-                                    },
-                                ]}
-                            >
-                                <Select
-                                    style={{
-                                        width: "100%",
-                                    }}
-                                    onChange={handleChangeSelect}
-                                    options={[
-                                        {
-                                            value: 1,
-                                            label: 'Iphone',
-                                        },
-                                        {
-                                            value: 2,
-                                            label: 'Samsung',
-                                        },
-                                        {
-                                            value: 3,
-                                            label: 'Xiaomi',
-                                        },
-                                        {
-                                            value: 4,
-                                            label: 'OnePlus',
-                                        },
-                                    ]}
-                                />
-                            </Form.Item>
-                        </Col>
+
 
                         <Col span={5}>
                             <Form.Item
                                 label="Price"
-                                name="giaSanPham"
+                                name="price"
                                 rules={[
                                     {
                                         required: true,
@@ -431,28 +359,16 @@ const Product = () => {
 
                         <Col span={4}>
                             <Form.Item
-                                label="Rating"
-                                name="rating"
+                                label="Stock"
+                                name="stock"
                                 rules={[
                                     {
                                         required: true,
-                                        message: 'Please input confirm rating!',
+                                        message: 'Please input stock!',
                                     },
                                 ]}
                             >
-                                <Select
-                                    style={{
-                                        width: "100%",
-                                    }}
-                                    onChange={handleChangeSelect}
-                                    options={[
-                                        { value: 1, label: 1 },
-                                        { value: 2, label: 2 },
-                                        { value: 3, label: 3 },
-                                        { value: 4, label: 4 },
-                                        { value: 5, label: 5 },
-                                    ]}
-                                />
+                                <Input type='number' min={1} />
                             </Form.Item>
                         </Col>
                     </Row>
@@ -460,12 +376,12 @@ const Product = () => {
                     <Row>
                         <Col span={16}>
                             <Form.Item
-                                label="Detail"
-                                name="moTaSanPham"
+                                label="Description"
+                                name="description"
                                 rules={[
                                     {
                                         required: true,
-                                        message: 'Please input detail!',
+                                        message: 'Please input description!',
                                     },
                                 ]}
                                 labelCol={{
@@ -476,7 +392,7 @@ const Product = () => {
                                 }}
 
                             >
-                                <Input.TextArea rows={11} placeholder="detail phone" className='rs-none' />
+                                <Input.TextArea rows={11} placeholder="description" className='rs-none' />
                             </Form.Item>
                         </Col>
 
@@ -534,8 +450,8 @@ const Product = () => {
 
             <Row className='w-100'>
                 <Table
-                    columns={Columns(expandedRowKeys, toggleDetail, handleConfirmDelete, handleOpenEditForm)}
-                    dataSource={productSearch}
+                    columns={Columns(confirm, handleClickEdit, categories)}
+                    dataSource={products}
                     pagination={{ pageSize: 10 }}
                     className='w-100'
                     scroll={{ y: 500 }}
